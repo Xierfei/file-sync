@@ -10,7 +10,7 @@ from flask import Flask, request, jsonify, render_template
 app = Flask(__name__)
 
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'client_config.json')
-CHUNK_SIZE = 1 * 1024 * 1024  # 1MB
+CHUNK_SIZE = 10 * 1024 * 1024  # 10MB
 MAX_RETRIES = 5
 RETRY_BASE_DELAY = 1  # seconds, exponential backoff
 

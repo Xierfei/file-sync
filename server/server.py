@@ -13,7 +13,7 @@ app = Flask(__name__)
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'server_config.json')
 SESSIONS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'upload_sessions.json')
 UPLOAD_TEMP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads_temp')
-CHUNK_SIZE = 1 * 1024 * 1024  # 1MB
+CHUNK_SIZE = 10 * 1024 * 1024  # 10MB
 
 config_lock = threading.Lock()
 session_lock = threading.Lock()
