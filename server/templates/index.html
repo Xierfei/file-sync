@@ -23,6 +23,8 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-
 .btn-sm { padding: 6px 14px; font-size: 13px; }
 .btn-success { background: #28a745; color: #fff; }
 .btn-success:hover { background: #218838; }
+.btn-outline { background: #fff; color: #1a73e8; border: 1px solid #1a73e8; }
+.btn-outline:hover { background: #e3f2fd; }
 .folder-list { list-style: none; }
 .folder-item { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border: 1px solid #e8e8e8; border-radius: 6px; margin-bottom: 8px; transition: background 0.15s; }
 .folder-item:hover { background: #f8f9fa; }
@@ -32,10 +34,32 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-
 .folder-actions { display: flex; gap: 8px; align-items: center; }
 .scan-progress { display: inline-block; font-size: 12px; color: #1a73e8; margin-left: 8px; }
 .empty-state { text-align: center; color: #999; padding: 32px; font-size: 14px; }
-.toast { position: fixed; top: 20px; right: 20px; padding: 12px 20px; border-radius: 6px; color: #fff; font-size: 14px; z-index: 1000; opacity: 0; transition: opacity 0.3s; }
+.toast { position: fixed; top: 20px; right: 20px; padding: 12px 20px; border-radius: 6px; color: #fff; font-size: 14px; z-index: 2000; opacity: 0; transition: opacity 0.3s; }
 .toast.show { opacity: 1; }
 .toast-success { background: #28a745; }
 .toast-error { background: #dc3545; }
+
+/* Modal */
+.modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.4); z-index: 1000; justify-content: center; align-items: center; }
+.modal-overlay.show { display: flex; }
+.modal { background: #fff; border-radius: 10px; width: 540px; max-width: 95vw; max-height: 80vh; display: flex; flex-direction: column; box-shadow: 0 8px 32px rgba(0,0,0,0.2); }
+.modal-header { padding: 16px 20px; border-bottom: 1px solid #e8e8e8; display: flex; justify-content: space-between; align-items: center; }
+.modal-header h3 { font-size: 16px; color: #333; }
+.modal-close { background: none; border: none; font-size: 22px; cursor: pointer; color: #999; padding: 4px 8px; line-height: 1; }
+.modal-close:hover { color: #333; }
+.modal-breadcrumb { padding: 10px 20px; background: #f8f9fa; border-bottom: 1px solid #e8e8e8; font-size: 13px; color: #666; display: flex; align-items: center; gap: 4px; flex-wrap: wrap; min-height: 40px; }
+.modal-breadcrumb .bc-link { cursor: pointer; color: #1a73e8; background: none; border: none; font-size: 13px; padding: 0; }
+.modal-breadcrumb .bc-link:hover { text-decoration: underline; }
+.modal-breadcrumb .bc-sep { color: #bbb; margin: 0 2px; }
+.modal-body { flex: 1; overflow-y: auto; min-height: 200px; max-height: 400px; }
+.dir-item { display: flex; align-items: center; padding: 10px 20px; cursor: pointer; border-bottom: 1px solid #f5f5f5; font-size: 14px; transition: background 0.1s; user-select: none; }
+.dir-item:hover { background: #e3f2fd; }
+.dir-item.selected { background: #bbdefb; }
+.dir-item .icon { margin-right: 10px; font-size: 18px; flex-shrink: 0; }
+.dir-item .name { word-break: break-all; }
+.modal-footer { padding: 14px 20px; border-top: 1px solid #e8e8e8; display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.modal-footer .current-path { flex: 1; font-size: 13px; color: #555; word-break: break-all; background: #f8f9fa; padding: 6px 10px; border-radius: 4px; min-height: 32px; line-height: 20px; }
+.dir-loading { text-align: center; padding: 40px; color: #999; }
 </style>
 </head>
 <body>
@@ -49,6 +73,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-
     <h2>添加目标文件夹</h2>
     <div class="input-row">
       <input type="text" id="folderPath" placeholder="输入文件夹路径，如 D:\SyncFolder" />
+      <button class="btn btn-outline btn-sm" onclick="openBrowser('folderPath')">浏览...</button>
       <button class="btn btn-primary" onclick="addFolder()">添加</button>
     </div>
   </div>
@@ -61,10 +86,28 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-
   </div>
 </div>
 
+<!-- Folder Browser Modal -->
+<div class="modal-overlay" id="browserModal">
+  <div class="modal">
+    <div class="modal-header">
+      <h3>📂 选择文件夹</h3>
+      <button class="modal-close" onclick="closeBrowser()">&times;</button>
+    </div>
+    <div class="modal-breadcrumb" id="breadcrumb"></div>
+    <div class="modal-body" id="dirList"></div>
+    <div class="modal-footer">
+      <div class="current-path" id="modalCurrentPath">请选择目录</div>
+      <button class="btn btn-primary btn-sm" onclick="confirmSelect()">选择此目录</button>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script>
 const API = '';
+let browserPath = '';
+let browserTargetInput = null;
 
 function showToast(msg, type = 'success') {
   const t = document.getElementById('toast');
@@ -73,12 +116,113 @@ function showToast(msg, type = 'success') {
   setTimeout(() => t.className = 'toast', 3000);
 }
 
-function formatSize(bytes) {
-  if (bytes < 1024) return bytes + ' B';
-  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
-  if (bytes < 1073741824) return (bytes / 1048576).toFixed(1) + ' MB';
-  return (bytes / 1073741824).toFixed(2) + ' GB';
+function escapeHtml(text) {
+  const d = document.createElement('div');
+  d.textContent = text;
+  return d.innerHTML;
 }
+
+// ── Folder Browser ────────────────────────────────────────────────────────
+
+function openBrowser(inputId) {
+  browserTargetInput = inputId;
+  const current = document.getElementById(inputId).value.trim();
+  document.getElementById('browserModal').classList.add('show');
+  browseTo(current || '');
+}
+
+function closeBrowser() {
+  document.getElementById('browserModal').classList.remove('show');
+}
+
+async function browseTo(path) {
+  const listEl = document.getElementById('dirList');
+  listEl.innerHTML = '<div class="dir-loading">加载中...</div>';
+  try {
+    const res = await fetch(API + '/api/browse', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({path: path})
+    });
+    const data = await res.json();
+    if (!res.ok) { showToast(data.error, 'error'); return; }
+
+    browserPath = data.current || '';
+    document.getElementById('modalCurrentPath').textContent = browserPath || '请选择驱动器';
+    renderBreadcrumb(browserPath);
+    renderDirList(data);
+  } catch (e) {
+    listEl.innerHTML = '<div class="dir-loading">加载失败</div>';
+    showToast('浏览失败: ' + e.message, 'error');
+  }
+}
+
+function renderBreadcrumb(currentPath) {
+  const bc = document.getElementById('breadcrumb');
+  let html = '<button class="bc-link" onclick="browseTo(\'\')">💻 我的电脑</button>';
+  if (currentPath) {
+    const parts = currentPath.replace(/\\/g, '/').split('/').filter(Boolean);
+    let accum = '';
+    for (let i = 0; i < parts.length; i++) {
+      // On Windows first part may be "D:", make it "D:\"
+      if (i === 0 && parts[i].endsWith(':')) {
+        accum = parts[i] + '\\';
+      } else {
+        accum = accum.replace(/\\$/, '') + '\\' + parts[i] + '\\';
+      }
+      const pathArg = accum.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+      html += `<span class="bc-sep">›</span><button class="bc-link" onclick="browseTo('${pathArg}')">${escapeHtml(parts[i])}</button>`;
+    }
+  }
+  bc.innerHTML = html;
+}
+
+function renderDirList(data) {
+  const listEl = document.getElementById('dirList');
+  let html = '';
+
+  if (data.parent !== null && data.parent !== undefined) {
+    const parentArg = (data.parent || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    html += `<div class="dir-item" ondblclick="browseTo('${parentArg}')">
+      <span class="icon">⬆️</span><span class="name">..</span>
+    </div>`;
+  }
+
+  for (const d of data.dirs) {
+    const full = browserPath ? (browserPath.replace(/\\$/, '') + '\\' + d) : d;
+    const fullArg = full.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    html += `<div class="dir-item" ondblclick="browseTo('${fullArg}')" onclick="clickDir(this, '${fullArg}')">
+      <span class="icon">📁</span><span class="name">${escapeHtml(d)}</span>
+    </div>`;
+  }
+
+  if (!html) {
+    html = '<div class="dir-loading">空目录</div>';
+  }
+  listEl.innerHTML = html;
+}
+
+function clickDir(el, path) {
+  document.querySelectorAll('#dirList .dir-item').forEach(e => e.classList.remove('selected'));
+  el.classList.add('selected');
+  browserPath = path;
+  document.getElementById('modalCurrentPath').textContent = path;
+}
+
+function confirmSelect() {
+  if (!browserPath) { showToast('请选择一个目录', 'error'); return; }
+  if (browserTargetInput) {
+    document.getElementById(browserTargetInput).value = browserPath;
+  }
+  closeBrowser();
+}
+
+// Close modal on overlay click
+document.getElementById('browserModal').addEventListener('click', function(e) {
+  if (e.target === this) closeBrowser();
+});
+
+// ── Folder Management ─────────────────────────────────────────────────────
 
 async function loadFolders() {
   try {
@@ -116,12 +260,6 @@ function formatScanStatus(s) {
   if (s.status === 'done') return '| ✅ 扫描完成';
   if (s.status === 'error') return `| ❌ 扫描出错: ${s.error}`;
   return '';
-}
-
-function escapeHtml(text) {
-  const d = document.createElement('div');
-  d.textContent = text;
-  return d.innerHTML;
 }
 
 async function addFolder() {
@@ -186,13 +324,11 @@ function pollScanStatus(id) {
   }, 500);
 }
 
-// Enter key support
 document.getElementById('folderPath').addEventListener('keypress', e => {
   if (e.key === 'Enter') addFolder();
 });
 
 loadFolders();
-// Refresh every 5s
 setInterval(loadFolders, 5000);
 </script>
 </body>

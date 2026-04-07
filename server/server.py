@@ -112,6 +112,35 @@ def read_md5_cache(folder_path, relative_path):
 def index():
     return render_template('index.html')
 
+# ── Browse API ──────────────────────────────────────────────────────────────
+
+@app.route('/api/browse', methods=['POST'])
+def browse_directory():
+    data = request.get_json()
+    path = data.get('path', '').strip()
+    if not path:
+        if os.name == 'nt':
+            import string
+            drives = [f'{d}:\\' for d in string.ascii_uppercase if os.path.exists(f'{d}:\\')]
+            return jsonify({'dirs': drives, 'current': '', 'parent': None})
+        return jsonify({'dirs': ['/'], 'current': '', 'parent': None})
+    if not os.path.isdir(path):
+        return jsonify({'error': '目录不存在'}), 400
+    try:
+        items = []
+        for name in sorted(os.listdir(path)):
+            full = os.path.join(path, name)
+            if os.path.isdir(full) and not name.startswith('.'):
+                items.append(name)
+        parent = os.path.dirname(path)
+        return jsonify({
+            'dirs': items,
+            'current': path,
+            'parent': parent if parent != path else None
+        })
+    except PermissionError:
+        return jsonify({'error': '无访问权限'}), 403
+
 # ── Folder APIs ─────────────────────────────────────────────────────────────
 
 @app.route('/api/folders', methods=['GET'])
