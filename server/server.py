@@ -65,7 +65,7 @@ def compute_md5(filepath):
     h = hashlib.md5()
     with open(filepath, 'rb') as f:
         while True:
-            chunk = f.read(8192)
+            chunk = f.read(1024 * 1024)  # 1MB buffer
             if not chunk:
                 break
             h.update(chunk)
@@ -279,8 +279,15 @@ def upload_init():
                 })
 
         uid = uuid.uuid4().hex
-        temp_dir = os.path.join(UPLOAD_TEMP_DIR, uid)
-        os.makedirs(temp_dir, exist_ok=True)
+        # Write directly to target file instead of temp chunks
+        target_path = os.path.join(folder['path'], rel)
+        os.makedirs(os.path.dirname(target_path), exist_ok=True)
+        temp_path = target_path + f'.uploading_{uid}'
+        # Pre-allocate file
+        with open(temp_path, 'wb') as f:
+            if size > 0:
+                f.seek(size - 1)
+                f.write(b'\x00')
 
         session = {
             'upload_id': uid,
@@ -292,7 +299,8 @@ def upload_init():
             'chunk_size': CHUNK_SIZE,
             'total_chunks': total_chunks,
             'received_chunks': [],
-            'temp_dir': temp_dir,
+            'temp_path': temp_path,
+            'target_path': target_path,
             'created_at': time.time()
         }
         upload_sessions[uid] = session
@@ -321,8 +329,10 @@ def upload_chunk(upload_id, chunk_index):
     if not chunk_data:
         return jsonify({'error': '空分片'}), 400
 
-    chunk_path = os.path.join(session['temp_dir'], f'chunk_{chunk_index}')
-    with open(chunk_path, 'wb') as f:
+    # Write directly to target file at correct offset
+    offset = chunk_index * session['chunk_size']
+    with open(session['temp_path'], 'r+b') as f:
+        f.seek(offset)
         f.write(chunk_data)
 
     with session_lock:
@@ -346,30 +356,25 @@ def upload_complete(upload_id):
         missing = set(range(session['total_chunks'])) - set(session['received_chunks'])
         return jsonify({'error': '缺少分片', 'missing_chunks': sorted(missing)}), 400
 
-    # Assemble file
-    target_path = os.path.join(session['folder_path'], session['relative_path'])
-    os.makedirs(os.path.dirname(target_path), exist_ok=True)
+    # Verify MD5 directly on the assembled temp file (no merge needed)
+    temp_path = session['temp_path']
+    target_path = session['target_path']
 
     try:
-        h = hashlib.md5()
-        with open(target_path, 'wb') as out:
-            for i in range(session['total_chunks']):
-                chunk_path = os.path.join(session['temp_dir'], f'chunk_{i}')
-                with open(chunk_path, 'rb') as cf:
-                    data = cf.read()
-                    h.update(data)
-                    out.write(data)
-
-        assembled_md5 = h.hexdigest()
+        assembled_md5 = compute_md5(temp_path)
         if assembled_md5 != session['md5']:
-            os.remove(target_path)
+            os.remove(temp_path)
             return jsonify({'error': 'MD5校验失败', 'expected': session['md5'], 'actual': assembled_md5}), 400
+
+        # Rename temp file to final target
+        if os.path.exists(target_path):
+            os.remove(target_path)
+        os.rename(temp_path, target_path)
 
         # Update MD5 cache
         save_md5_cache(session['folder_path'], session['relative_path'], assembled_md5)
 
-        # Clean up
-        shutil.rmtree(session['temp_dir'], ignore_errors=True)
+        # Clean up session
         with session_lock:
             key = (session['folder_id'], session['relative_path'], session['md5'])
             upload_sessions.pop(upload_id, None)
