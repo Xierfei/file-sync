@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>文件同步 - 服务端</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f0f2f5; color: #333; }
+.header { background: #1a73e8; color: #fff; padding: 20px 32px; }
+.header h1 { font-size: 22px; font-weight: 500; }
+.container { max-width: 900px; margin: 24px auto; padding: 0 16px; }
+.card { background: #fff; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); padding: 24px; margin-bottom: 20px; }
+.card h2 { font-size: 17px; margin-bottom: 16px; color: #1a73e8; }
+.input-row { display: flex; gap: 10px; margin-bottom: 16px; }
+.input-row input { flex: 1; padding: 10px 14px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; }
+.input-row input:focus { outline: none; border-color: #1a73e8; }
+.btn { padding: 10px 20px; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500; transition: background 0.2s; }
+.btn-primary { background: #1a73e8; color: #fff; }
+.btn-primary:hover { background: #1557b0; }
+.btn-danger { background: #dc3545; color: #fff; }
+.btn-danger:hover { background: #c82333; }
+.btn-sm { padding: 6px 14px; font-size: 13px; }
+.btn-success { background: #28a745; color: #fff; }
+.btn-success:hover { background: #218838; }
+.folder-list { list-style: none; }
+.folder-item { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border: 1px solid #e8e8e8; border-radius: 6px; margin-bottom: 8px; transition: background 0.15s; }
+.folder-item:hover { background: #f8f9fa; }
+.folder-info { flex: 1; }
+.folder-path { font-size: 14px; font-weight: 500; word-break: break-all; }
+.folder-status { font-size: 12px; color: #666; margin-top: 4px; }
+.folder-actions { display: flex; gap: 8px; align-items: center; }
+.scan-progress { display: inline-block; font-size: 12px; color: #1a73e8; margin-left: 8px; }
+.empty-state { text-align: center; color: #999; padding: 32px; font-size: 14px; }
+.toast { position: fixed; top: 20px; right: 20px; padding: 12px 20px; border-radius: 6px; color: #fff; font-size: 14px; z-index: 1000; opacity: 0; transition: opacity 0.3s; }
+.toast.show { opacity: 1; }
+.toast-success { background: #28a745; }
+.toast-error { background: #dc3545; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>📁 文件同步服务端</h1>
+</div>
+
+<div class="container">
+  <div class="card">
+    <h2>添加目标文件夹</h2>
+    <div class="input-row">
+      <input type="text" id="folderPath" placeholder="输入文件夹路径，如 D:\SyncFolder" />
+      <button class="btn btn-primary" onclick="addFolder()">添加</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>已配置的目标文件夹</h2>
+    <ul class="folder-list" id="folderList">
+      <li class="empty-state">加载中...</li>
+    </ul>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const API = '';
+
+function showToast(msg, type = 'success') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast show toast-' + type;
+  setTimeout(() => t.className = 'toast', 3000);
+}
+
+function formatSize(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+  if (bytes < 1073741824) return (bytes / 1048576).toFixed(1) + ' MB';
+  return (bytes / 1073741824).toFixed(2) + ' GB';
+}
+
+async function loadFolders() {
+  try {
+    const res = await fetch(API + '/api/folders');
+    const folders = await res.json();
+    const list = document.getElementById('folderList');
+    if (folders.length === 0) {
+      list.innerHTML = '<li class="empty-state">暂无配置的文件夹，请添加目标文件夹</li>';
+      return;
+    }
+    list.innerHTML = folders.map(f => `
+      <li class="folder-item" id="folder-${f.id}">
+        <div class="folder-info">
+          <div class="folder-path">${escapeHtml(f.path)}</div>
+          <div class="folder-status">
+            ID: ${f.id} | 
+            状态: ${f.exists ? '✅ 可用' : '❌ 目录不存在'}
+            <span class="scan-progress" id="scan-${f.id}">${formatScanStatus(f.scan_status)}</span>
+          </div>
+        </div>
+        <div class="folder-actions">
+          <button class="btn btn-success btn-sm" onclick="scanFolder(${f.id})" ${!f.exists ? 'disabled' : ''}>扫描MD5</button>
+          <button class="btn btn-danger btn-sm" onclick="removeFolder(${f.id})">删除</button>
+        </div>
+      </li>
+    `).join('');
+  } catch (e) {
+    showToast('加载失败: ' + e.message, 'error');
+  }
+}
+
+function formatScanStatus(s) {
+  if (!s || s.status === 'idle') return '';
+  if (s.status === 'scanning') return `| 🔄 扫描中 ${s.scanned}/${s.total}`;
+  if (s.status === 'done') return '| ✅ 扫描完成';
+  if (s.status === 'error') return `| ❌ 扫描出错: ${s.error}`;
+  return '';
+}
+
+function escapeHtml(text) {
+  const d = document.createElement('div');
+  d.textContent = text;
+  return d.innerHTML;
+}
+
+async function addFolder() {
+  const input = document.getElementById('folderPath');
+  const path = input.value.trim();
+  if (!path) return showToast('请输入路径', 'error');
+  try {
+    const res = await fetch(API + '/api/folders', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({path})
+    });
+    const data = await res.json();
+    if (!res.ok) return showToast(data.error, 'error');
+    input.value = '';
+    showToast('添加成功');
+    loadFolders();
+  } catch (e) {
+    showToast('添加失败: ' + e.message, 'error');
+  }
+}
+
+async function removeFolder(id) {
+  if (!confirm('确定删除该文件夹配置？')) return;
+  try {
+    await fetch(API + '/api/folders/' + id, {method: 'DELETE'});
+    showToast('已删除');
+    loadFolders();
+  } catch (e) {
+    showToast('删除失败', 'error');
+  }
+}
+
+let scanPollers = {};
+
+async function scanFolder(id) {
+  try {
+    const res = await fetch(API + '/api/scan/' + id, {method: 'POST'});
+    const data = await res.json();
+    if (!res.ok) return showToast(data.error, 'error');
+    showToast('开始扫描');
+    pollScanStatus(id);
+  } catch (e) {
+    showToast('启动扫描失败', 'error');
+  }
+}
+
+function pollScanStatus(id) {
+  if (scanPollers[id]) clearInterval(scanPollers[id]);
+  scanPollers[id] = setInterval(async () => {
+    try {
+      const res = await fetch(API + '/api/scan/' + id + '/status');
+      const s = await res.json();
+      const el = document.getElementById('scan-' + id);
+      if (el) el.textContent = formatScanStatus(s);
+      if (s.status === 'done' || s.status === 'error') {
+        clearInterval(scanPollers[id]);
+        delete scanPollers[id];
+        if (s.status === 'done') showToast('扫描完成');
+      }
+    } catch (e) { /* ignore */ }
+  }, 500);
+}
+
+// Enter key support
+document.getElementById('folderPath').addEventListener('keypress', e => {
+  if (e.key === 'Enter') addFolder();
+});
+
+loadFolders();
+// Refresh every 5s
+setInterval(loadFolders, 5000);
+</script>
+</body>
+</html>

@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>文件同步 - 客户端</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f0f2f5; color: #333; }
+.header { background: #2e7d32; color: #fff; padding: 20px 32px; display: flex; justify-content: space-between; align-items: center; }
+.header h1 { font-size: 22px; font-weight: 500; }
+.conn-status { font-size: 13px; padding: 4px 12px; border-radius: 12px; }
+.conn-ok { background: rgba(255,255,255,0.25); }
+.conn-fail { background: rgba(255,0,0,0.3); }
+.container { max-width: 960px; margin: 24px auto; padding: 0 16px; }
+.card { background: #fff; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); padding: 24px; margin-bottom: 20px; }
+.card h2 { font-size: 17px; margin-bottom: 16px; color: #2e7d32; }
+.form-group { margin-bottom: 14px; }
+.form-group label { display: block; font-size: 13px; font-weight: 500; margin-bottom: 6px; color: #555; }
+.form-row { display: flex; gap: 10px; }
+.form-row input, .form-row select { flex: 1; padding: 10px 14px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; }
+.form-row input:focus, .form-row select:focus { outline: none; border-color: #2e7d32; }
+.btn { padding: 10px 20px; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500; transition: all 0.2s; }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-primary { background: #2e7d32; color: #fff; }
+.btn-primary:hover:not(:disabled) { background: #1b5e20; }
+.btn-danger { background: #dc3545; color: #fff; }
+.btn-danger:hover:not(:disabled) { background: #c82333; }
+.btn-sm { padding: 6px 14px; font-size: 13px; }
+.btn-outline { background: #fff; color: #2e7d32; border: 1px solid #2e7d32; }
+.btn-outline:hover:not(:disabled) { background: #e8f5e9; }
+
+/* Progress */
+.progress-section { margin-top: 8px; }
+.progress-bar-bg { height: 8px; background: #e0e0e0; border-radius: 4px; overflow: hidden; margin: 8px 0; }
+.progress-bar-fill { height: 100%; background: linear-gradient(90deg, #43a047, #2e7d32); border-radius: 4px; transition: width 0.3s; }
+.stats { display: flex; gap: 24px; flex-wrap: wrap; margin: 12px 0; }
+.stat { font-size: 13px; }
+.stat-value { font-weight: 600; font-size: 16px; color: #2e7d32; }
+.stat-label { color: #888; margin-top: 2px; }
+.current-file { font-size: 13px; color: #666; word-break: break-all; margin: 8px 0; }
+
+/* File lists */
+.tabs { display: flex; gap: 0; margin-bottom: 0; border-bottom: 2px solid #e0e0e0; }
+.tab { padding: 10px 20px; cursor: pointer; font-size: 14px; font-weight: 500; color: #888; border-bottom: 2px solid transparent; margin-bottom: -2px; transition: all 0.2s; }
+.tab.active { color: #2e7d32; border-bottom-color: #2e7d32; }
+.tab-badge { background: #e8f5e9; color: #2e7d32; font-size: 11px; border-radius: 10px; padding: 1px 7px; margin-left: 6px; }
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+.file-list { max-height: 400px; overflow-y: auto; }
+.file-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; border-bottom: 1px solid #f0f0f0; font-size: 13px; }
+.file-item:last-child { border-bottom: none; }
+.file-name { word-break: break-all; flex: 1; }
+.file-size { color: #999; margin-left: 12px; white-space: nowrap; }
+.file-result { color: #2e7d32; margin-left: 12px; white-space: nowrap; font-size: 12px; }
+.file-error { color: #dc3545; margin-left: 12px; white-space: nowrap; font-size: 12px; }
+.empty-state { text-align: center; color: #999; padding: 32px; font-size: 14px; }
+
+.toast { position: fixed; top: 20px; right: 20px; padding: 12px 20px; border-radius: 6px; color: #fff; font-size: 14px; z-index: 1000; opacity: 0; transition: opacity 0.3s; }
+.toast.show { opacity: 1; }
+.toast-success { background: #28a745; }
+.toast-error { background: #dc3545; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>🚗 文件同步客户端</h1>
+  <span class="conn-status" id="connStatus">未连接</span>
+</div>
+
+<div class="container">
+  <!-- Server Config -->
+  <div class="card">
+    <h2>服务器配置</h2>
+    <div class="form-group">
+      <label>服务器地址</label>
+      <div class="form-row">
+        <input type="text" id="serverUrl" placeholder="http://192.168.1.100:8080" />
+        <button class="btn btn-outline btn-sm" onclick="saveServerUrl()">保存</button>
+        <button class="btn btn-outline btn-sm" onclick="testConnection()">测试连接</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Sync Config -->
+  <div class="card">
+    <h2>同步设置</h2>
+    <div class="form-group">
+      <label>本地目录</label>
+      <div class="form-row">
+        <input type="text" id="localDir" placeholder="输入本地目录路径，如 D:\MyData" />
+      </div>
+    </div>
+    <div class="form-group">
+      <label>服务器目标文件夹</label>
+      <div class="form-row">
+        <select id="serverFolder">
+          <option value="">-- 请先连接服务器 --</option>
+        </select>
+        <button class="btn btn-outline btn-sm" onclick="loadServerFolders()">刷新</button>
+      </div>
+    </div>
+    <div style="display: flex; gap: 10px; margin-top: 16px;">
+      <button class="btn btn-primary" id="btnStart" onclick="startSync()">开始同步</button>
+      <button class="btn btn-danger" id="btnStop" onclick="stopSync()" disabled>停止同步</button>
+    </div>
+  </div>
+
+  <!-- Progress -->
+  <div class="card" id="progressCard" style="display: none;">
+    <h2>同步进度</h2>
+    <div class="stats">
+      <div class="stat">
+        <div class="stat-value" id="statSpeed">0 KB/s</div>
+        <div class="stat-label">当前网速</div>
+      </div>
+      <div class="stat">
+        <div class="stat-value" id="statTotal">0</div>
+        <div class="stat-label">总文件数</div>
+      </div>
+      <div class="stat">
+        <div class="stat-value" id="statSynced">0</div>
+        <div class="stat-label">已同步</div>
+      </div>
+      <div class="stat">
+        <div class="stat-value" id="statSkipped">0</div>
+        <div class="stat-label">已跳过</div>
+      </div>
+      <div class="stat">
+        <div class="stat-value" id="statFailed">0</div>
+        <div class="stat-label">失败</div>
+      </div>
+    </div>
+    <div class="current-file" id="currentFile"></div>
+    <div class="progress-bar-bg">
+      <div class="progress-bar-fill" id="progressBar" style="width: 0%"></div>
+    </div>
+    <div class="current-file" id="fileProgress"></div>
+  </div>
+
+  <!-- File Lists -->
+  <div class="card">
+    <div class="tabs">
+      <div class="tab active" data-tab="pending" onclick="switchTab('pending')">
+        待同步 <span class="tab-badge" id="pendingCount">0</span>
+      </div>
+      <div class="tab" data-tab="completed" onclick="switchTab('completed')">
+        已完成 <span class="tab-badge" id="completedCount">0</span>
+      </div>
+      <div class="tab" data-tab="failed" onclick="switchTab('failed')">
+        失败 <span class="tab-badge" id="failedCount">0</span>
+      </div>
+    </div>
+    <div class="tab-content active" id="tab-pending">
+      <div class="file-list" id="pendingList">
+        <div class="empty-state">暂无待同步文件</div>
+      </div>
+    </div>
+    <div class="tab-content" id="tab-completed">
+      <div class="file-list" id="completedList">
+        <div class="empty-state">暂无已完成文件</div>
+      </div>
+    </div>
+    <div class="tab-content" id="tab-failed">
+      <div class="file-list" id="failedList">
+        <div class="empty-state">暂无失败文件</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const API = '';
+let pollTimer = null;
+
+function showToast(msg, type = 'success') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast show toast-' + type;
+  setTimeout(() => t.className = 'toast', 3000);
+}
+
+function formatSize(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+  if (bytes < 1073741824) return (bytes / 1048576).toFixed(1) + ' MB';
+  return (bytes / 1073741824).toFixed(2) + ' GB';
+}
+
+function formatSpeed(bps) {
+  if (bps < 1024) return bps.toFixed(0) + ' B/s';
+  if (bps < 1048576) return (bps / 1024).toFixed(1) + ' KB/s';
+  if (bps < 1073741824) return (bps / 1048576).toFixed(1) + ' MB/s';
+  return (bps / 1073741824).toFixed(2) + ' GB/s';
+}
+
+function escapeHtml(text) {
+  const d = document.createElement('div');
+  d.textContent = text;
+  return d.innerHTML;
+}
+
+// ── Config ──────────────────────────────────────────────────────────────
+
+async function loadConfig() {
+  try {
+    const res = await fetch(API + '/api/config');
+    const cfg = await res.json();
+    document.getElementById('serverUrl').value = cfg.server_url || '';
+    if (cfg.server_url) {
+      loadServerFolders();
+    }
+  } catch (e) { /* ignore */ }
+}
+
+async function saveServerUrl() {
+  const url = document.getElementById('serverUrl').value.trim();
+  try {
+    await fetch(API + '/api/config', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({server_url: url})
+    });
+    showToast('服务器地址已保存');
+    loadServerFolders();
+  } catch (e) {
+    showToast('保存失败', 'error');
+  }
+}
+
+async function testConnection() {
+  const st = document.getElementById('connStatus');
+  st.textContent = '测试中...';
+  st.className = 'conn-status';
+  try {
+    const res = await fetch(API + '/api/server/test');
+    const data = await res.json();
+    if (data.ok) {
+      st.textContent = `已连接 (${data.folders} 个文件夹)`;
+      st.className = 'conn-status conn-ok';
+      showToast('连接成功');
+    } else {
+      st.textContent = '连接失败';
+      st.className = 'conn-status conn-fail';
+      showToast(data.error, 'error');
+    }
+  } catch (e) {
+    st.textContent = '连接失败';
+    st.className = 'conn-status conn-fail';
+    showToast('连接失败: ' + e.message, 'error');
+  }
+}
+
+async function loadServerFolders() {
+  const select = document.getElementById('serverFolder');
+  try {
+    const res = await fetch(API + '/api/server/folders');
+    if (!res.ok) {
+      const data = await res.json();
+      select.innerHTML = `<option value="">连接失败: ${escapeHtml(data.error || '')}</option>`;
+      return;
+    }
+    const folders = await res.json();
+    if (folders.length === 0) {
+      select.innerHTML = '<option value="">服务器暂无配置文件夹</option>';
+      return;
+    }
+    select.innerHTML = '<option value="">-- 请选择 --</option>' +
+      folders.map(f => `<option value="${f.id}">${escapeHtml(f.path)} ${f.exists ? '' : '(不可用)'}</option>`).join('');
+
+    // Update connection status
+    const st = document.getElementById('connStatus');
+    st.textContent = `已连接 (${folders.length} 个文件夹)`;
+    st.className = 'conn-status conn-ok';
+  } catch (e) {
+    select.innerHTML = '<option value="">连接服务器失败</option>';
+  }
+}
+
+// ── Sync ────────────────────────────────────────────────────────────────
+
+async function startSync() {
+  const localDir = document.getElementById('localDir').value.trim();
+  const folderId = document.getElementById('serverFolder').value;
+  if (!localDir) return showToast('请输入本地目录', 'error');
+  if (!folderId) return showToast('请选择服务器文件夹', 'error');
+
+  try {
+    const res = await fetch(API + '/api/sync/start', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({local_dir: localDir, folder_id: parseInt(folderId)})
+    });
+    const data = await res.json();
+    if (!res.ok) return showToast(data.error, 'error');
+    showToast('同步开始');
+    document.getElementById('btnStart').disabled = true;
+    document.getElementById('btnStop').disabled = false;
+    document.getElementById('progressCard').style.display = '';
+    startPolling();
+  } catch (e) {
+    showToast('启动失败: ' + e.message, 'error');
+  }
+}
+
+async function stopSync() {
+  try {
+    await fetch(API + '/api/sync/stop', {method: 'POST'});
+    showToast('正在停止...');
+  } catch (e) { /* ignore */ }
+}
+
+function startPolling() {
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = setInterval(pollStatus, 500);
+}
+
+async function pollStatus() {
+  try {
+    const res = await fetch(API + '/api/sync/status');
+    const s = await res.json();
+    updateUI(s);
+    if (!s.running && pollTimer) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+      document.getElementById('btnStart').disabled = false;
+      document.getElementById('btnStop').disabled = true;
+      if (s.error_msg) showToast(s.error_msg, 'error');
+      else showToast('同步完成');
+    }
+  } catch (e) { /* ignore */ }
+}
+
+function updateUI(s) {
+  // Stats
+  document.getElementById('statSpeed').textContent = formatSpeed(s.speed || 0);
+  document.getElementById('statTotal').textContent = s.total_files;
+  document.getElementById('statSynced').textContent = s.synced_files;
+  document.getElementById('statSkipped').textContent = s.skipped_files;
+  document.getElementById('statFailed').textContent = s.failed.length;
+
+  // Current file
+  if (s.current_file) {
+    document.getElementById('currentFile').textContent = '正在同步: ' + s.current_file;
+    const pct = s.current_size > 0 ? ((s.current_progress / s.current_size) * 100).toFixed(1) : 0;
+    document.getElementById('fileProgress').textContent =
+      `${formatSize(s.current_progress)} / ${formatSize(s.current_size)} (${pct}%)`;
+    document.getElementById('progressBar').style.width = pct + '%';
+  } else {
+    document.getElementById('currentFile').textContent = s.running ? '准备中...' : '同步完成';
+    document.getElementById('fileProgress').textContent = '';
+    document.getElementById('progressBar').style.width = s.running ? '0%' : '100%';
+  }
+
+  // Badges
+  document.getElementById('pendingCount').textContent = s.pending.length;
+  document.getElementById('completedCount').textContent = s.completed.length;
+  document.getElementById('failedCount').textContent = s.failed.length;
+
+  // Lists
+  renderList('pendingList', s.pending, item =>
+    `<div class="file-item">
+      <span class="file-name">${escapeHtml(item.relative_path)}</span>
+      <span class="file-size">${formatSize(item.size)}</span>
+    </div>`
+  );
+  renderList('completedList', s.completed, item =>
+    `<div class="file-item">
+      <span class="file-name">${escapeHtml(item.relative_path)}</span>
+      <span class="file-result">${escapeHtml(item.result)}</span>
+      <span class="file-size">${formatSize(item.size)}</span>
+    </div>`
+  );
+  renderList('failedList', s.failed, item =>
+    `<div class="file-item">
+      <span class="file-name">${escapeHtml(item.relative_path)}</span>
+      <span class="file-error">${escapeHtml(item.error)}</span>
+      <span class="file-size">${formatSize(item.size)}</span>
+    </div>`
+  );
+}
+
+function renderList(id, items, renderer) {
+  const el = document.getElementById(id);
+  if (items.length === 0) {
+    el.innerHTML = '<div class="empty-state">暂无数据</div>';
+    return;
+  }
+  el.innerHTML = items.map(renderer).join('');
+}
+
+// ── Tabs ────────────────────────────────────────────────────────────────
+
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.toggle('active', t.id === 'tab-' + name));
+}
+
+// ── Init ────────────────────────────────────────────────────────────────
+
+loadConfig();
+
+// Auto-save server URL on blur
+document.getElementById('serverUrl').addEventListener('blur', function() {
+  if (this.value.trim()) saveServerUrl();
+});
+
+// Check if sync is already running
+(async function() {
+  try {
+    const res = await fetch(API + '/api/sync/status');
+    const s = await res.json();
+    if (s.running) {
+      document.getElementById('btnStart').disabled = true;
+      document.getElementById('btnStop').disabled = false;
+      document.getElementById('progressCard').style.display = '';
+      startPolling();
+    }
+  } catch (e) { /* ignore */ }
+})();
+</script>
+</body>
+</html>
